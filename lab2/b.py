@@ -29,6 +29,7 @@ class QLearner:
         er_min: float,
         er_decay: float,
         no_buckets: tuple[int, int, int, int],
+        sarsa: bool = False,
         render_mode: Literal[
             "human",
             "rgb_array",
@@ -59,6 +60,8 @@ class QLearner:
             tuple[tuple[int, int, int, int], int],
             float
         ] = defaultdict(float)
+
+        self.sarsa = sarsa
 
         self.lr = lr
         self.lr_min = lr_min
@@ -115,7 +118,19 @@ class QLearner:
             )
             new_observation = self.discretise(new_observation)
 
-            self.update_knowledge(action, observation, new_observation, reward)
+            next_action = (
+                self.pick_action(new_observation)
+                if self.sarsa
+                else None
+            )
+
+            self.update_knowledge(
+                observation,
+                new_observation,
+                reward,
+                action,
+                next_action
+            )
 
             observation = new_observation
             reward_sum += reward
@@ -147,15 +162,23 @@ class QLearner:
 
     def update_knowledge(
         self,
-        action: int,
         observation: tuple[int, int, int, int],
         new_observation: tuple[int, int, int, int],
-        reward: float
+        reward: float,
+        action: int,
+        next_action: int | None = None,
     ) -> None:
-        k = self.knowledge_base[(observation, action)]
-        bk = self.get_best_knowledge(new_observation)
-        self.knowledge_base[observation, action] \
-            = (1.0 - self.lr) * k + self.lr * (reward + self.df * bk)
+        current_q = self.knowledge_base[observation, action]
+
+        if self.sarsa and next_action is not None:
+            next_q = self.knowledge_base[new_observation, next_action]
+        else:
+            next_q = self.get_best_knowledge(new_observation)
+
+        self.knowledge_base[observation, action] = (
+            (1.0 - self.lr) * current_q
+            + self.lr * (reward + self.df * next_q)
+        )
 
     def get_best_knowledge(self, observation) -> float:
         return max(
@@ -289,6 +312,12 @@ def main():
         description="Q-Learning — The Stick of the Truth"
     )
     parser.add_argument(
+        "-s", "--sarsa",
+        action="store_true",
+        default=False,
+        help="Use SARSA instead of Q-Learning"
+    )
+    parser.add_argument(
         "-e", "--evaluate",
         action="store_true",
         default=True,
@@ -303,14 +332,21 @@ def main():
     args = parser.parse_args()
 
     if args.train:
-        train()
+        train(args.sarsa)
     if args.evaluate:
-        evaluate()
+        evaluate(
+            args.sarsa,
+            params_csv_path=os.path.join(
+                "results",
+                "qlearning_training.csv"
+            )
+        )
 
 
-def train() -> None:
+def train(sarsa: bool = False) -> None:
     trainer = Trainer(
         Learner=QLearner,
+        sarsa=sarsa,
         lr=(0.05, 0.5),
         lr_min=(0.001, 0.1),
         lr_decay=(0.9, 1.0),
@@ -345,29 +381,39 @@ def train() -> None:
     os.makedirs(os.path.join("results"), exist_ok=True)
 
     results.to_csv(
-        os.path.join("results", "qlearning_standard_training.csv"),
+        os.path.join(
+            "results",
+            f"{"qlearning" if not sarsa else "sarsa"}_training.csv"
+        ),
         index=False
     )
 
 
-def evaluate() -> None:
-    results = pd.read_csv(
-        os.path.join("results", "qlearning_standard_training.csv")
+def evaluate(sarsa: bool = False, params_csv_path = str) -> None:
+    results = pd.read_csv(params_csv_path)
+    results.sort_values(
+        by="reward",
+        ascending=False,
+        ignore_index=True,
+        inplace=True
     )
-    results.sort_values(by="reward", ascending=False, inplace=True)
 
     top_n = 5
+    leading_zeros = math.ceil(math.log10(top_n))
     no_runs = 15
     no_attempts = 1000
     window = 10
 
     for i, params in results.head(top_n).iterrows():
-        print(f"\nModel {i + 1}: Reward = {params['reward']:.2f}")
+        trial = int(params['trial'])
+
+        print(f"\nModel {trial}: Reward = {params['reward']:.2f}")
 
         all_rewards: list[tuple[int, float]] = []
 
         for run in range(no_runs):
             learner = QLearner(
+                sarsa=sarsa,
                 lr=params["lr"],
                 lr_min=params["lr_min"],
                 lr_decay=params["lr_decay"],
@@ -442,11 +488,16 @@ def evaluate() -> None:
 
         os.makedirs(os.path.join("results", "visuals"), exist_ok=True)
 
-        plt.savefig(os.path.join(
-            "results",
-            "visuals",
-            f"qlearning_standard_model_{int(params['trial'])}.png"
-        ))
+        filename = (
+            ("qlearning" if not sarsa else "sarsa")
+            + "_"
+            + f"{i:0{leading_zeros}}"
+            + "_model_"
+            + str(trial)
+            + ".png"
+        )
+        plt.savefig(os.path.join("results", "visuals", filename))
+
         plt.close()
 
 
