@@ -9,7 +9,7 @@ import csv
 import statistics
 
 class QLearner:
-    def __init__(self, bucket_num, e, alpha, dsc, iter_change, e_change, alpha_change, dsc_change = 1, knowledge=None, vis=False):
+    def __init__(self,bucket_num, e, alpha, dsc, iter_change, e_change, alpha_change, dsc_change = 1, knowledge=None, vis=False):
         if vis:
             self.environment = gym.make('CartPole-v1', render_mode="human")
         else:
