@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+ipykernel = "~=6.29.5"
+pygame = "~=2.6.1"
+numpy = "~=2.2.5"
+optuna = "~=4.3.0"
+pandas = "~=2.2.3"
+seaborn = "~=0.13.2"
+matplotlib = "~=3.10.1"
+gymnasium = {extras = ["box2d"], version = "~=1.1.1"}
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"
