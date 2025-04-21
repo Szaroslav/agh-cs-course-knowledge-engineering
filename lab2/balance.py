@@ -15,6 +15,8 @@ from optuna import Study, Trial
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+DiscreteObservationSpace = tuple[int, int, int, int]
+
 
 class QLearner:
     def __init__(
@@ -28,7 +30,7 @@ class QLearner:
         er: float,
         er_min: float,
         er_decay: float,
-        no_buckets: tuple[int, int, int, int],
+        no_buckets: DiscreteObservationSpace,
         sarsa: bool = False,
         render_mode: Literal[
             "human",
@@ -41,7 +43,7 @@ class QLearner:
 
         self.attempt_no = 1
         self.rewards: list[float] = []
-        self.actions = (0, 1)
+        self.actions = [a for a in range(self.environment.action_space.n)]
 
         self.lower_bounds = [
             self.environment.observation_space.low[0],
@@ -56,8 +58,8 @@ class QLearner:
             math.radians(50)
         ]
 
-        self.knowledge_base: defaultdict[
-            tuple[tuple[int, int, int, int], int],
+        self.Q: defaultdict[
+            tuple[DiscreteObservationSpace, int],
             float
         ] = defaultdict(float)
 
@@ -76,7 +78,7 @@ class QLearner:
         self.er_decay = er_decay
 
         self.buckets = [
-            np.linspace(l_bounds, u_bounds, num=n)
+            np.linspace(l_bounds, u_bounds, num=n + 1)
             for l_bounds, u_bounds, n in zip(
                 self.lower_bounds,
                 self.upper_bounds,
@@ -124,7 +126,7 @@ class QLearner:
                 else None
             )
 
-            self.update_knowledge(
+            self.update_q(
                 observation,
                 new_observation,
                 reward,
@@ -147,7 +149,7 @@ class QLearner:
     def discretise(
         self,
         observation: NDArray[np.float32]
-    ) -> tuple[int, int, int, int]:
+    ) -> DiscreteObservationSpace:
         return tuple([
             np.digitize(observation[i], self.buckets[i])
             for i in range(len(observation))
@@ -160,38 +162,37 @@ class QLearner:
             return self.sample()
         return self.get_best_action(observation)
 
-    def update_knowledge(
+    def update_q(
         self,
-        observation: tuple[int, int, int, int],
-        new_observation: tuple[int, int, int, int],
+        observation: DiscreteObservationSpace,
+        new_observation: DiscreteObservationSpace,
         reward: float,
         action: int,
         next_action: int | None = None,
     ) -> None:
-        current_q = self.knowledge_base[observation, action]
+        current_q = self.Q[observation, action]
 
         if self.sarsa and next_action is not None:
-            next_q = self.knowledge_base[new_observation, next_action]
+            next_q = self.Q[new_observation, next_action]
         else:
-            next_q = self.get_best_knowledge(new_observation)
+            next_q = self.get_best_q(new_observation)
 
-        self.knowledge_base[observation, action] = (
-            (1.0 - self.lr) * current_q
-            + self.lr * (reward + self.df * next_q)
+        self.Q[observation, action] = (
+            (1.0 - self.lr) * current_q + self.lr * (reward + self.df * next_q)
         )
 
-    def get_best_knowledge(self, observation) -> float:
+    def get_best_q(self, observation) -> float:
         return max(
-            [self.knowledge_base[(observation, a)] for a in self.actions]
+            [self.Q[(observation, a)] for a in self.actions]
         )
 
     def get_best_action(self, observation) -> int:
         return max(
-            [(self.knowledge_base[(observation, a)], a) for a in self.actions]
+            [(self.Q[(observation, a)], a) for a in self.actions]
         )[1]
 
 
-class Trainer():
+class Tuner():
     def __init__(
         self,
         Learner: type[QLearner],
@@ -204,7 +205,7 @@ class Trainer():
         er: tuple[float, float],
         er_min: tuple[float, float],
         er_decay: tuple[float, float],
-        no_buckets: tuple[tuple[int, int, int, int], tuple[int, int, int, int]],
+        no_buckets: tuple[DiscreteObservationSpace, DiscreteObservationSpace],
         no_trials: int = 100,
         no_attempts_per_trial: int = 500,
         no_validation_runs: int = 5,
@@ -344,7 +345,7 @@ def main():
 
 
 def train(sarsa: bool = False) -> None:
-    trainer = Trainer(
+    tuner = Tuner(
         Learner=QLearner,
         sarsa=sarsa,
         lr=(0.05, 0.5),
@@ -360,7 +361,7 @@ def train(sarsa: bool = False) -> None:
         no_trials=1000,
     )
 
-    study = trainer.run()
+    study = tuner.run()
 
     print("\nThe best parameters:", study.best_params)
     print("The best score:", study.best_value)
